@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Versioned (not just "net8.0-windows") so the desktop-activation half of
+         Microsoft.Toolkit.Uwp.Notifications (DesktopNotificationManagerCompat, NotificationActivator;
+         see ToastNotifications.cs) actually resolves; that package only ships those APIs in its
+         net5.0-windows10.0.17763 asset, not the plain net5.0 one an unversioned TFM would pick. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>SharpEmuUpdater</AssemblyName>
+    <RootNamespace>SharpEmuUpdater</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- This app only ships an English UI. Without this, self-contained publish drags in
+         localized resource DLLs for a dozen-plus languages nothing here ever uses. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Net.Http.Json" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <!-- ProtectedData.Protect/Unprotect (Windows DPAPI), see TokenFileStore. Not part of the
+         base BCL; this package is what actually exposes it in .NET (Core) 8. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- REQUIRED ATTRIBUTION: see NOTICE.txt at the repo root. Embedded, not a loose file, so
+         it ships inside the single-file publish exe like everything else: no separate asset to
+         lose track of when zipping up a release. Do not remove this entry or creator.png. -->
+    <EmbeddedResource Include="creator.png" />
+  </ItemGroup>
+
+</Project>

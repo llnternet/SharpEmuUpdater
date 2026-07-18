@@ -1,0 +1,30 @@
+SharpEmu Updater - Setup Instructions
+======================================
+Created by llnternet
+
+1. Go to github.com > profile picture (top right) > Settings > Developer
+   settings > Personal access tokens > Tokens (classic).
+2. Click "Generate new token" > "Generate new token (classic)".
+3. Check the "repo" scope box, scroll down, click "Generate token".
+4. Copy the token GitHub shows you (starts with ghp_) -- you only get to
+   see it once.
+
+5. In this same folder as SharpEmuUpdater.exe, create a file named
+   token.txt and paste the token in as the only content. Save it.
+6. Run SharpEmuUpdater.exe.
+
+That's it. The app encrypts token.txt automatically and deletes the
+plain-text copy -- nothing sensitive is left sitting on disk. To change
+tokens later, just edit token.txt again and click "Reload Token from
+File" in the app.
+
+Prefer a fine-grained token instead of classic? Generate one under
+"Personal access tokens > Fine-grained tokens" with Actions: Read-only
+and Contents: Read-only permissions, repository access covering
+sharpemu/sharpemu plus any fork you might switch to, then do steps 5-6
+above the same way.
+
+Antivirus flagging the exe? False positive -- self-contained .NET exes
+like this one unpack themselves at startup, which some heuristics
+mistake for a dropper. Report it at microsoft.com/wdsi/filesubmission or
+add an exclusion.

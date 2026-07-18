@@ -1,0 +1,19 @@
+# Build output -- these carry this machine's absolute build path baked into compiled
+# DLL/PDB debug metadata by the compiler itself, not anything in source. Never commit them.
+bin/
+obj/
+
+# IDE/user-specific
+.vs/
+.idea/
+*.user
+*.suo
+
+# Local packaging output
+*.zip
+
+# Tokens -- token.txt is a plaintext drop-in only, encrypted to token.dat and deleted on load;
+# neither should ever be committed.
+token.txt
+token.dat
+*.dat

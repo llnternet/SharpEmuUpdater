@@ -34,6 +34,8 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 - Cancelled/skipped builds with no actual Windows artifact are filtered out automatically
 - Detects the Windows build by keyword rather than an exact filename, so it keeps working even
   if the project ever renames its build artifacts
+- Automatically follows the main SharpEmu repo (and any fork/branch you're tracking) if it's
+  renamed or transferred to a new owner on GitHub -- no need to manually re-point the app
 
 **🔔 Notifications & Status**
 - Toast notifications + tray badge when a new build is available

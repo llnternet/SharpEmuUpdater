@@ -5,6 +5,17 @@ on GitHub Actions and installs them for you. It is an unofficial, third-party ut
 **llnternet** and is not affiliated with, endorsed by, or maintained by the SharpEmu project or
 its contributors.
 
+## 🚀 Setup
+
+1. Download `SharpEmuUpdater.zip` from [Releases](https://github.com/llnternet/SharpEmuUpdater/releases)
+   and extract it.
+2. See [`HOW TO SET UP YOUR TOKEN.txt`](HOW%20TO%20SET%20UP%20YOUR%20TOKEN.txt) for how to
+   generate a GitHub personal access token (classic or fine-grained, either works) and drop it
+   into a `token.txt` file next to the exe -- the app encrypts it (Windows DPAPI, tied to your own
+   Windows user account) and deletes the plain-text copy automatically the moment it's read.
+3. Run `SharpEmuUpdater.exe`. Use "Switch Fork..." to pick which repo/branch to track, and
+   "Select Build..." to install a build.
+
 ## 📱 Using this on Android
 
 This app itself is Windows-only, since SharpEmu's builds are Windows executables. If you want to
@@ -65,8 +76,9 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 - Added a secondary-rate-limit indicator, separate from the existing API budget counter, so a
   GitHub abuse-detection block shows a clear message instead of looking like a random error
 
-## What this app does and does not do
+## ⚖️ Legal
 
+**What this app does and does not do**
 - SharpEmu Updater does **not** contain, embed, or distribute any part of the SharpEmu emulator's
   source code or compiled binaries. It contains no PlayStation firmware, BIOS, system software,
   or game data of any kind.
@@ -78,13 +90,13 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 - It does not modify, patch, decrypt, or otherwise interact with any game files, and it does not
   emulate anything itself.
 
-## Not affiliated with Sony
+**Not affiliated with Sony**
 
 This project is not affiliated with, endorsed by, or connected in any way to Sony Interactive
 Entertainment, PlayStation, or any of their subsidiaries or trademarks. "PlayStation" and "PS5"
 are trademarks of Sony Interactive Entertainment.
 
-## SharpEmu's own terms apply
+**SharpEmu's own terms apply**
 
 SharpEmu itself is licensed under **GPL-2.0** and is developed for research and educational
 purposes. Per SharpEmu's own README: it does not support or condone piracy, and users are
@@ -92,16 +104,6 @@ expected to use only legally obtained copies of their own games, dumped from con
 personally own. Installing SharpEmu through this updater does not change or exempt you from
 SharpEmu's own license terms or usage policy -- see the
 [upstream repository](https://github.com/sharpemu/sharpemu) for the authoritative terms.
-
-## Setup
-
-See [`HOW TO SET UP YOUR TOKEN.txt`](HOW%20TO%20SET%20UP%20YOUR%20TOKEN.txt) for how to create a
-GitHub personal access token (classic or fine-grained, either works) and point this app at it. The
-token is yours; this app sends it only to `api.github.com` to read run/artifact data and download
-artifacts on your behalf. It is never sent anywhere else. You drop it in as a plain-text
-`token.txt` once, and the app encrypts it (Windows DPAPI, tied to your own Windows user account on
-this machine) and deletes the plain-text copy automatically the moment it's read -- there is no
-plain-text credential file left sitting on disk in normal use.
 
 ## Attribution
 

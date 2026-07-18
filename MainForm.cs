@@ -130,6 +130,14 @@ public sealed class MainForm : Form
     // without the user needing to keep manually clicking retry against a check that's still going
     // to fail the exact same way in the meantime.
     private readonly System.Windows.Forms.Timer _gitHubStatusTimer = new() { Interval = 30000 };
+    // Runs on its own schedule, unconditionally -- not gated behind AutoCheck or a saved token the
+    // way CheckNowAsync's SharpEmu-build tracking is, since checking for this app's OWN update is
+    // unauthenticated and unrelated to whether GitHub build-tracking itself is configured or
+    // turned on (same reasoning, and the same real bug class already found and fixed once on the
+    // mobile side: the equivalent check there used to be silently gated behind a token check that
+    // had nothing to do with it). New releases happen far less often than SharpEmu builds, so a
+    // long interval is plenty -- this isn't trying to catch a release within minutes of publish.
+    private readonly System.Windows.Forms.Timer _selfUpdateTimer = new() { Interval = 6 * 60 * 60 * 1000 };
     private string? _displayedIncidentId;
     private DateTimeOffset? _displayedIncidentUpdatedAt;
     // Set whenever CheckNowAsync/ApplyUpdateAsync fails, to whatever re-running that same call
@@ -326,6 +334,8 @@ public sealed class MainForm : Form
         _timer.Tick += async (_, _) => await CheckNowAsync(manual: false);
         _liveStatusTimer.Tick += async (_, _) => await RefreshRecentBuildsOnlyAsync();
         _gitHubStatusTimer.Tick += async (_, _) => await PollGitHubStatusAsync();
+        _selfUpdateTimer.Tick += async (_, _) => await CheckForSelfUpdateAsync();
+        _selfUpdateTimer.Start();
         _spinnerTimer.Tick += (_, _) =>
         {
             _spinnerAngle = (_spinnerAngle + 24f) % 360f;
@@ -377,6 +387,7 @@ public sealed class MainForm : Form
         _discordPresence.UpdateClientId(_state.DiscordClientId);
         RefreshInstalledLabel();
         RefreshLatestBuildLabelFromCache();
+        _ = CheckForSelfUpdateAsync();
     }
 
     protected override CreateParams CreateParams
@@ -1562,6 +1573,7 @@ public sealed class MainForm : Form
         _spinnerTimer.Stop();
         _liveStatusTimer.Stop();
         _gitHubStatusTimer.Stop();
+        _selfUpdateTimer.Stop();
         _service?.Dispose();
         _discordPresence.Dispose();
         Close();
@@ -2489,12 +2501,33 @@ public sealed class MainForm : Form
     /// once the builds list has actually been fetched at least once this session.</summary>
     private void UpdateDiscordPresence()
     {
-        string forkLabel = $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})";
+        // Owner/repo only, no branch -- Discord's own profile card truncates aggressively
+        // (confirmed live), and this is read fresh from _state on every call so it always
+        // reflects whatever fork is actually tracked right now, not a fixed name.
+        string forkLabel = $"{_state.ForkOwner}/{_state.ForkRepo}";
         string? buildLabel = string.IsNullOrEmpty(_state.LastAppliedSha) ? null : _state.LastAppliedSha;
         BuildPlatforms? platforms = buildLabel == null
             ? null
             : _recentRuns.FirstOrDefault(r => r.Run.ShortSha == buildLabel)?.AvailablePlatforms;
         _discordPresence.SetPresence(forkLabel, buildLabel, platforms);
+    }
+
+    /// <summary>Checks llnternet/SharpEmuUpdater's own releases for a version newer than this
+    /// running copy (see SelfUpdateChecker/AppVersion), and announces it via toast + Activity Log
+    /// the first time a given version is found -- shares the same "same version never re-announced
+    /// twice" convention as the mobile app's own equivalent check.</summary>
+    private async Task CheckForSelfUpdateAsync()
+    {
+        var update = await SelfUpdateChecker.CheckForUpdateAsync(CancellationToken.None);
+        if (update == null || update.Version == _state.LastAnnouncedUpdaterVersion) return;
+
+        Logger.Log($"A new version of SharpEmu Updater is available: {update.Version} -- {update.ReleaseUrl}");
+        ToastNotifications.ShowNewBuild(
+            "SharpEmu Updater update available",
+            $"{update.Version} is ready to download from GitHub.");
+
+        _state.LastAnnouncedUpdaterVersion = update.Version;
+        _state.Save();
     }
 
     /// <summary>

@@ -46,6 +46,11 @@ public sealed class AppState
     // connection attempted at all) while this is blank.
     public string DiscordClientId { get; set; } = "";
 
+    // Last SharpEmu Updater version (see SelfUpdateChecker/AppVersion) already announced via
+    // toast + Activity Log, so the same newly-published version doesn't get re-announced on
+    // every check while the user just hasn't gotten around to updating yet.
+    public string LastAnnouncedUpdaterVersion { get; set; } = "";
+
     // Pixel distance from the top of the Recent Builds/Activity Log SplitContainer to the
     // splitter bar -- null until the user actually drags it once, at which point it's saved so
     // the chosen split survives a restart instead of resetting to even every time.

@@ -179,6 +179,8 @@ public sealed class MainForm : Form
     private PictureBox? _headerIcon;
     private Label _stablePill = null!;
     private RoundedPanel _stablePillPanel = null!;
+    private TextBox _discordClientIdBox = null!;
+    private readonly DiscordPresenceManager _discordPresence = new();
     private Label _installedValueLabel = null!;
     private Label _latestValueLabel = null!;
     private Label _statusValueLabel = null!;
@@ -372,6 +374,7 @@ public sealed class MainForm : Form
             _root.Invalidate(true);
         };
 
+        _discordPresence.UpdateClientId(_state.DiscordClientId);
         RefreshInstalledLabel();
         RefreshLatestBuildLabelFromCache();
     }
@@ -1085,7 +1088,13 @@ public sealed class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Margin = new Padding(0, 0, 0, Gap),
             BackColor = Color.Transparent,
-            WrapContents = false,
+            // Was false (forced single line) until the Discord Client ID field was added -- this
+            // row is now too wide to fit on one line at the app's fixed window width, and with
+            // WrapContents=false, FlowLayoutPanel doesn't shrink its children or scroll, it just
+            // silently clips whatever doesn't fit past the visible edge (confirmed live: the
+            // Publish Mobile Update button vanished entirely). True lets it wrap to a second line
+            // instead -- the row's own AutoSize height picks up the extra line automatically.
+            WrapContents = true,
         };
 
         // NumericUpDown is the tallest of the three (~23px); Label the shortest (~15px).
@@ -1127,6 +1136,42 @@ public sealed class MainForm : Form
         };
 
         flow.Controls.AddRange(new Control[] { _autoCheckCheckBox, intervalLabel, _intervalUpDown });
+
+        var discordLabel = new Label
+        {
+            Text = "Discord Client ID:", AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent,
+            Font = Theme.UiFont(9f), Margin = new Padding(UiScale.S(20), UiScale.S(5), UiScale.S(6), 0),
+        };
+        _discordClientIdBox = new TextBox
+        {
+            Text = _state.DiscordClientId,
+            BackColor = Theme.Elevated,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.None,
+            Font = Theme.UiFont(9f),
+            Width = UiScale.S(150),
+        };
+        int discordBoxVPad = UiScale.S(4);
+        int discordBoxHeight = _discordClientIdBox.PreferredHeight + discordBoxVPad * 2 + UiScale.S(2);
+        var discordBoxWrap = new RoundedPanel
+        {
+            Size = new Size(UiScale.S(150) + UiScale.S(16), discordBoxHeight),
+            BackColor = Theme.Elevated,
+            CornerRadius = UiScale.S(6),
+            Padding = new Padding(UiScale.S(8), discordBoxVPad, UiScale.S(8), discordBoxVPad),
+            Margin = new Padding(0, UiScale.S(9), 0, 0),
+        };
+        discordBoxWrap.Controls.Add(_discordClientIdBox);
+        _toolTip.SetToolTip(discordLabel, "Optional -- shows the fork/build you're tracking on your Discord profile. " +
+            "Register a free Application at discord.com/developers/applications to get an ID.");
+        _discordClientIdBox.TextChanged += (_, _) =>
+        {
+            _state.DiscordClientId = _discordClientIdBox.Text.Trim();
+            _state.Save();
+            _discordPresence.UpdateClientId(_state.DiscordClientId);
+            UpdateDiscordPresence();
+        };
+        flow.Controls.AddRange(new Control[] { discordLabel, discordBoxWrap });
 
         return flow;
     }
@@ -1518,6 +1563,7 @@ public sealed class MainForm : Form
         _liveStatusTimer.Stop();
         _gitHubStatusTimer.Stop();
         _service?.Dispose();
+        _discordPresence.Dispose();
         Close();
         Application.Exit();
     }
@@ -1692,6 +1738,10 @@ public sealed class MainForm : Form
             // RefreshRecentBuildsOnlyAsync's next 20s tick compares against what's actually shown
             // now, not a stale signature from before this check ran.
             _lastAppliedRunsSignature = ComputeRunsSignature(_recentRuns);
+            // Refreshes with real platform info now that _recentRuns has actually loaded --
+            // RefreshInstalledLabel's own call (fired on fork switch/install) can't know platforms
+            // until this list exists.
+            UpdateDiscordPresence();
         }
         catch (Exception ex)
         {
@@ -2428,6 +2478,23 @@ public sealed class MainForm : Form
         // repaint here, the star stays stuck on whichever build happened to be installed the
         // last time the list actually redrew, even after an upgrade/downgrade completes.
         _buildsListBox?.Invalidate();
+
+        UpdateDiscordPresence();
+    }
+
+    /// <summary>Refreshes the optional Discord Rich Presence line (see DiscordPresenceManager)
+    /// with the currently tracked fork/branch and installed build. A no-op if no Client ID is
+    /// configured. Platform info comes from matching the installed sha against whatever's
+    /// currently loaded in _recentRuns -- not persisted anywhere of its own, so it's only known
+    /// once the builds list has actually been fetched at least once this session.</summary>
+    private void UpdateDiscordPresence()
+    {
+        string forkLabel = $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})";
+        string? buildLabel = string.IsNullOrEmpty(_state.LastAppliedSha) ? null : _state.LastAppliedSha;
+        BuildPlatforms? platforms = buildLabel == null
+            ? null
+            : _recentRuns.FirstOrDefault(r => r.Run.ShortSha == buildLabel)?.AvailablePlatforms;
+        _discordPresence.SetPresence(forkLabel, buildLabel, platforms);
     }
 
     /// <summary>

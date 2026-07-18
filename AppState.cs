@@ -40,6 +40,12 @@ public sealed class AppState
 
     public string InstallDir { get; set; } = AppPaths.DefaultInstallDir;
 
+    // Discord Application Client ID for Rich Presence (see DiscordPresenceManager) -- a public
+    // identifier, not a secret, but empty by default since it's specific to whichever Discord
+    // Application the user registers for themselves. Rich Presence is entirely disabled (no
+    // connection attempted at all) while this is blank.
+    public string DiscordClientId { get; set; } = "";
+
     // Pixel distance from the top of the Recent Builds/Activity Log SplitContainer to the
     // splitter bar -- null until the user actually drags it once, at which point it's saved so
     // the chosen split survives a restart instead of resetting to even every time.

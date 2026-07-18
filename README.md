@@ -63,6 +63,12 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 - Search/filter in Recent Builds and Switch Fork
 - Draggable splitter, dark purple theme matching SharpEmu's own branding
 
+**🎮 Discord Rich Presence**
+- Optional -- shows the fork/branch you're tracking and the build you have installed
+  (with platforms) on your Discord profile
+- Register a free Application at [discord.com/developers/applications](https://discord.com/developers/applications)
+  and paste its Client ID in -- disabled entirely while that field is blank
+
 **🔒 Security**
 - Your GitHub token is encrypted at rest (Windows DPAPI) -- never stored as plain text
 - Works with either classic or fine-grained Personal Access Tokens

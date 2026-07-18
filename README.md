@@ -100,6 +100,14 @@ Created by **llnternet**. See [`NOTICE.txt`](NOTICE.txt) for the attribution ter
 this project's own code (separate from, and in addition to, SharpEmu's own GPL-2.0 license for
 the emulator itself).
 
+## License
+
+This project's own code is licensed under the [MIT License](LICENSE). This app does not include,
+link against, or redistribute any of SharpEmu's own source or binaries -- it only calls the public
+GitHub API and downloads/launches build artifacts SharpEmu's own CI already publishes -- so this
+license applies only to SharpEmuUpdater's own code, not to SharpEmu itself (see "SharpEmu's own
+terms apply" above).
+
 ## No warranty
 
 This software is provided "as is", without warranty of any kind, express or implied. Use it at

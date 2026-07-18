@@ -5,6 +5,13 @@ on GitHub Actions and installs them for you. It is an unofficial, third-party ut
 **llnternet** and is not affiliated with, endorsed by, or maintained by the SharpEmu project or
 its contributors.
 
+## 📱 Using this on Android
+
+This app itself is Windows-only, since SharpEmu's builds are Windows executables. If you want to
+check build/update status from your phone, see
+**[SharpEmu Tracker](https://github.com/llnternet/SharpEmuTracker)** -- a companion Android app
+for viewing purposes (no download/install/launch, just live build status and notifications).
+
 ## ⚠️ Disclaimer
 
 This is an unofficial, third-party tool. Not affiliated with, endorsed by, or connected to the

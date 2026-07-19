@@ -7,6 +7,11 @@ public sealed class SelfUpdateInfo
 {
     public required string Version { get; init; }
     public required string ReleaseUrl { get; init; }
+    public required string ReleaseNotes { get; init; }
+    public required DateTimeOffset PublishedAt { get; init; }
+    public DateTimeOffset? CurrentVersionPublishedAt { get; init; }
+    public required string DownloadUrl { get; init; }
+    public required long DownloadSizeBytes { get; init; }
 }
 
 /// <summary>
@@ -40,9 +45,9 @@ public static class SelfUpdateChecker
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
 
-    /// <summary>Null if already up to date, or the check itself failed for any reason (network
-    /// hiccup, repo has no releases yet, ...) -- a failed check must never surface as an error,
-    /// it just means "no update banner this time."</summary>
+    /// <summary>Null if already up to date, the release has no zip asset, or the check itself
+    /// failed for any reason (network hiccup, repo has no releases yet, ...) -- a failed check
+    /// must never surface as an error, it just means "no update banner this time."</summary>
     public static async Task<SelfUpdateInfo?> CheckForUpdateAsync(CancellationToken ct)
     {
         try
@@ -55,10 +60,34 @@ public static class SelfUpdateChecker
             if (!TryParseVersion(AppVersion.Current, out var current)) return null;
             if (latest <= current) return null;
 
+            var asset = release.Assets.FirstOrDefault(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            if (asset == null || string.IsNullOrEmpty(asset.BrowserDownloadUrl)) return null;
+
+            // Purely cosmetic (shown next to "Current Version" in the update dialog) -- a failed
+            // lookup here (e.g. the current version's own release was deleted, or this build
+            // predates the self-update feature entirely) just means that date is omitted, not a
+            // reason to abandon reporting the real, already-confirmed newer version.
+            DateTimeOffset? currentPublishedAt = null;
+            try
+            {
+                var currentRelease = await _http.GetFromJsonAsync<GitHubReleaseDto>(
+                    $"repos/{RepoOwner}/{RepoName}/releases/tags/v{AppVersion.Current}", ct);
+                currentPublishedAt = currentRelease?.PublishedAt;
+            }
+            catch
+            {
+                // See above -- not fatal.
+            }
+
             return new SelfUpdateInfo
             {
                 Version = release.TagName,
                 ReleaseUrl = release.HtmlUrl,
+                ReleaseNotes = release.Body,
+                PublishedAt = release.PublishedAt,
+                CurrentVersionPublishedAt = currentPublishedAt,
+                DownloadUrl = asset.BrowserDownloadUrl,
+                DownloadSizeBytes = asset.Size,
             };
         }
         catch
@@ -82,5 +111,26 @@ public static class SelfUpdateChecker
 
         [JsonPropertyName("html_url")]
         public string HtmlUrl { get; set; } = "";
+
+        [JsonPropertyName("body")]
+        public string Body { get; set; } = "";
+
+        [JsonPropertyName("published_at")]
+        public DateTimeOffset PublishedAt { get; set; }
+
+        [JsonPropertyName("assets")]
+        public List<GitHubReleaseAssetDto> Assets { get; set; } = new();
+    }
+
+    private sealed class GitHubReleaseAssetDto
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [JsonPropertyName("browser_download_url")]
+        public string BrowserDownloadUrl { get; set; } = "";
+
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
     }
 }

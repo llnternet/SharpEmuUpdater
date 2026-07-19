@@ -663,7 +663,7 @@ public sealed class MainForm : Form
 
         var title = new Label
         {
-            Text = "SharpEmu Updater",
+            Text = $"SharpEmu Updater v{AppVersion.Current}",
             Font = Theme.UiFont(10.5f, FontStyle.Bold),
             ForeColor = Theme.Text,
             BackColor = Color.Transparent,
@@ -1697,6 +1697,15 @@ public sealed class MainForm : Form
     /// </summary>
     private async Task CheckNowAsync(bool manual)
     {
+        // Manual "Check Now" clicks also check for a SharpEmu Updater self-update, same as the
+        // independent 6-hour _selfUpdateTimer already does -- unauthenticated and unrelated to
+        // the token/service gate right below, so it runs even before that. Not run on every
+        // automatic timer tick too (that's what _selfUpdateTimer is already for) -- doing it here
+        // as well on every automatic tick would mean checking this unauthenticated endpoint as
+        // often as the user's SharpEmu build-check interval, which could be far more frequent
+        // than actually useful.
+        if (manual) await CheckForSelfUpdateAsync();
+
         if (_service == null)
         {
             if (manual) SetStatus("No token file found. See log for the expected paths.");
@@ -2513,21 +2522,41 @@ public sealed class MainForm : Form
     }
 
     /// <summary>Checks llnternet/SharpEmuUpdater's own releases for a version newer than this
-    /// running copy (see SelfUpdateChecker/AppVersion), and announces it via toast + Activity Log
-    /// the first time a given version is found -- shares the same "same version never re-announced
-    /// twice" convention as the mobile app's own equivalent check.</summary>
+    /// running copy (see SelfUpdateChecker/AppVersion). Logs + toasts once per newly-found
+    /// version (background awareness even if the window isn't in focus), then shows the actual
+    /// Update Available dialog (SelfUpdateAvailableForm) -- unless the user already explicitly
+    /// clicked "Skip This Update" for this exact version, which is the only thing that suppresses
+    /// it; "Remind Me Later"/closing the dialog does not, so it reappears next check.</summary>
     private async Task CheckForSelfUpdateAsync()
     {
         var update = await SelfUpdateChecker.CheckForUpdateAsync(CancellationToken.None);
-        if (update == null || update.Version == _state.LastAnnouncedUpdaterVersion) return;
+        if (update == null || update.Version == _state.SkippedUpdaterVersion) return;
 
-        Logger.Log($"A new version of SharpEmu Updater is available: {update.Version} -- {update.ReleaseUrl}");
-        ToastNotifications.ShowNewBuild(
-            "SharpEmu Updater update available",
-            $"{update.Version} is ready to download from GitHub.");
+        if (update.Version != _state.LastAnnouncedUpdaterVersion)
+        {
+            Logger.Log($"A new version of SharpEmu Updater is available: {update.Version} -- {update.ReleaseUrl}");
+            ToastNotifications.ShowNewBuild(
+                "SharpEmu Updater update available",
+                $"{update.Version} is ready to download from GitHub.");
+            _state.LastAnnouncedUpdaterVersion = update.Version;
+            _state.Save();
+        }
 
-        _state.LastAnnouncedUpdaterVersion = update.Version;
-        _state.Save();
+        if (!Visible) RestoreFromTray();
+        using var dialog = new SelfUpdateAvailableForm(update);
+        var result = dialog.ShowDialog(this);
+        if (dialog.Skipped)
+        {
+            _state.SkippedUpdaterVersion = update.Version;
+            _state.Save();
+        }
+        else if (result == DialogResult.OK)
+        {
+            // Download and Install succeeded and already launched the handoff script, which is
+            // now waiting for this process to exit -- exit immediately rather than sit through
+            // its wait timeout for no reason.
+            ExitApplication();
+        }
     }
 
     /// <summary>

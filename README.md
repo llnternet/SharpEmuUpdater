@@ -50,7 +50,9 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 
 **🔔 Notifications & Status**
 - Toast notifications + tray badge when a new build is available
-- Toast notification when a new version of SharpEmu Updater itself is available
+- When a new version of SharpEmu Updater itself is available, a toast plus an in-app "Update
+  Available" dialog (current/new version, download size, changelog) with Download and Install,
+  Skip This Update, or Remind Me Later
 - Live GitHub API budget indicator, with a clear warning if you get rate-limited
 - Live GitHub status indicator if GitHub itself is having an outage
 - Status stays live-synced with the build list at all times

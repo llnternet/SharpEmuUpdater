@@ -77,14 +77,6 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
 - Works with either classic or fine-grained Personal Access Tokens
 - Token is sent only to `api.github.com` over HTTPS, never anywhere else, never logged
 
-## 🐛 Recent Fixes
-
-- Fixed a stale-connection error ("No such host is known") that could show up right after your
-  PC woke from sleep during an automatic check
-- Platform labels now correctly disappear once that platform's artifact expires or is removed
-- Added a secondary-rate-limit indicator, separate from the existing API budget counter, so a
-  GitHub abuse-detection block shows a clear message instead of looking like a random error
-
 ## ⚖️ Legal
 
 **What this app does and does not do**

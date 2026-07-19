@@ -71,12 +71,32 @@ public sealed class WorkflowRun
     [JsonPropertyName("html_url")]
     public string HtmlUrl { get; set; } = "";
 
-    public string ShortSha => HeadSha.Length >= 7 ? HeadSha[..7] : HeadSha;
+    // The three properties below are never populated from the Actions API (no JsonPropertyName)
+    // -- they exist purely so a synthetic, Releases-backed "run" (see
+    // GitHubUpdaterService.GetRecentReleaseBuildsAsync) can be built out of this same type and
+    // flow through all the existing rendering/install/changelog code unchanged, instead of a
+    // second parallel model + UI path.
+
+    // Set to the release's tag name for a Releases-backed row -- checked first by ShortSha below.
+    // HeadSha itself is ALSO set to the full tag name for these rows (not just this override), so
+    // GetCommitsBetweenAsync's compare-API call still gets a real, resolvable git ref.
+    public string? ShortShaOverride { get; set; }
+
+    // Set to the release's tag name (e.g. "v1.4.2") for a Releases-backed row -- checked first by
+    // DisplayNumber below, since a release has no Actions run number to show instead.
+    public string? DisplayNumberOverride { get; set; }
+
+    // Null for every Actions-sourced run. Set to the matched Windows asset's browser_download_url
+    // for a Releases-backed row -- doubles as the "this row came from Releases, not Actions" signal
+    // MainForm.ApplyUpdateAsync branches on, so no separate bool flag is needed.
+    public string? WindowsAssetDownloadUrl { get; set; }
+
+    public string ShortSha => ShortShaOverride ?? (HeadSha.Length >= 7 ? HeadSha[..7] : HeadSha);
 
     /// <summary>e.g. "#468" or "#468 (PR #209)" -- for display only.</summary>
-    public string DisplayNumber => PullRequests.Count > 0
+    public string DisplayNumber => DisplayNumberOverride ?? (PullRequests.Count > 0
         ? $"#{RunNumber} (PR #{PullRequests[0].Number})"
-        : $"#{RunNumber}";
+        : $"#{RunNumber}");
 }
 
 public sealed class PullRequestRef
@@ -170,6 +190,54 @@ public sealed class ArtifactsResponse
 {
     [JsonPropertyName("artifacts")]
     public List<Artifact> Artifacts { get; set; } = new();
+}
+
+/// <summary>A single published GitHub Release -- see GitHubUpdaterService.GetRecentReleaseBuildsAsync,
+/// which maps these into synthetic WorkflowRun/ClassifiedRun rows for the upstream-main "Recent
+/// Builds" list. A separate type from SelfUpdateChecker's own private release DTO (that one is for
+/// this app's own releases; this one is for SharpEmu's).</summary>
+public sealed class GitHubReleaseDto
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("tag_name")]
+    public string TagName { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    // The release's own notes -- used as the row's DisplayTitle (see
+    // GitHubUpdaterService.GetRecentReleaseBuildsAsync), the same role a commit message plays for
+    // an Actions-based row, rather than just repeating the tag/name a second time.
+    [JsonPropertyName("body")]
+    public string? Body { get; set; }
+
+    [JsonPropertyName("published_at")]
+    public DateTimeOffset PublishedAt { get; set; }
+
+    [JsonPropertyName("html_url")]
+    public string HtmlUrl { get; set; } = "";
+
+    // A token with push access can see unpublished drafts via this same endpoint -- those must
+    // never show up as if they were real recent builds.
+    [JsonPropertyName("draft")]
+    public bool Draft { get; set; }
+
+    [JsonPropertyName("assets")]
+    public List<GitHubReleaseAssetDto> Assets { get; set; } = new();
+}
+
+public sealed class GitHubReleaseAssetDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("browser_download_url")]
+    public string BrowserDownloadUrl { get; set; } = "";
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
 }
 
 /// <summary>Shape of GitHub's "compare two commits" API response -- only the bits this app

@@ -201,6 +201,7 @@ public sealed class MainForm : Form
     // to report.
     private Label _gitHubStatusValueLabel = null!;
     private Label _installDirValueLabel = null!;
+    private Label _forkCaptionLabel = null!;
     private Label _forkValueLabel = null!;
     private AccentProgress _progress = null!;
     private RoundedButton _checkNowButton = null!;
@@ -1242,14 +1243,13 @@ public sealed class MainForm : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        var caption = new Label
+        _forkCaptionLabel = new Label
         {
-            Text = "ACTIVE FORK", AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent,
+            AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent,
             Font = Theme.UiFont(8.5f, FontStyle.Bold), Margin = new Padding(0, UiScale.S(10), UiScale.S(20), 0),
         };
         _forkValueLabel = new Label
         {
-            Text = $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})",
             AutoSize = false,
             Dock = DockStyle.Fill,
             ForeColor = Theme.Text,
@@ -1259,10 +1259,28 @@ public sealed class MainForm : Form
             AutoEllipsis = true,
             Margin = new Padding(0, UiScale.S(6), 0, 0),
         };
+        RefreshForkLabels();
 
-        row.Controls.Add(caption, 0, 0);
+        row.Controls.Add(_forkCaptionLabel, 0, 0);
         row.Controls.Add(_forkValueLabel, 1, 0);
         return row;
+    }
+
+    /// <summary>
+    /// The upstream repo's own "main" branch (see GitHubUpdaterService.IsUpstreamMainBranch) is
+    /// the project's own tagged-release line, not a contributor's in-progress branch -- shown as
+    /// "SOURCE REPOSITORY" / "sharpemu/sharpemu (Main Releases)" instead of the generic
+    /// "ACTIVE FORK" / "{owner}/{repo} ({branch})" every other tracked fork/branch gets. Single
+    /// place both label texts are computed, called from BuildActiveForkRow (initial construction)
+    /// and everywhere else the tracked fork/branch can change at runtime.
+    /// </summary>
+    private void RefreshForkLabels()
+    {
+        bool isUpstreamMain = GitHubUpdaterService.IsUpstreamMainBranch(_state.ForkOwner, _state.ForkRepo, _state.ForkBranch);
+        _forkCaptionLabel.Text = isUpstreamMain ? "SOURCE REPOSITORY" : "ACTIVE FORK";
+        _forkValueLabel.Text = isUpstreamMain
+            ? $"{_state.ForkOwner}/{_state.ForkRepo} (Main Releases)"
+            : $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})";
     }
 
     private Control BuildBuildsCard()
@@ -1679,7 +1697,7 @@ public sealed class MainForm : Form
         _state.ForkOwner = resolvedOwner;
         _state.ForkRepo = resolvedRepo;
         _state.Save();
-        _forkValueLabel.Text = $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})";
+        RefreshForkLabels();
 
         string? token = TokenFileStore.Load();
         if (token != null)
@@ -1748,7 +1766,9 @@ public sealed class MainForm : Form
             }
             SetStatus("Checking...");
 
-            _recentRuns = await _service.GetRecentClassifiedRunsAsync(RecentRunsToShow, _state.ForkBranch, CancellationToken.None);
+            _recentRuns = GitHubUpdaterService.IsUpstreamMainBranch(_service.Owner, _service.Repo, _state.ForkBranch)
+                ? await _service.GetRecentReleaseBuildsAsync(RecentRunsToShow, CancellationToken.None)
+                : await _service.GetRecentClassifiedRunsAsync(RecentRunsToShow, _state.ForkBranch, CancellationToken.None);
             // Reaching this line means the real GitHub API call just succeeded -- whatever
             // incident (if any) was being watched is no longer stopping requests from going
             // through, so there's nothing left to poll for.
@@ -2075,7 +2095,9 @@ public sealed class MainForm : Form
         if (_service == null || _checkInProgress) return;
         try
         {
-            var runs = await _service.GetRecentClassifiedRunsAsync(RecentRunsToShow, _state.ForkBranch, CancellationToken.None);
+            var runs = GitHubUpdaterService.IsUpstreamMainBranch(_service.Owner, _service.Repo, _state.ForkBranch)
+                ? await _service.GetRecentReleaseBuildsAsync(RecentRunsToShow, CancellationToken.None)
+                : await _service.GetRecentClassifiedRunsAsync(RecentRunsToShow, _state.ForkBranch, CancellationToken.None);
 
             string signature = ComputeRunsSignature(runs);
             if (signature == _lastAppliedRunsSignature)
@@ -2160,7 +2182,7 @@ public sealed class MainForm : Form
         _state.ForkBranch = fork.Branch;
         _state.Save();
 
-        _forkValueLabel.Text = $"{_state.ForkOwner}/{_state.ForkRepo} ({_state.ForkBranch})";
+        RefreshForkLabels();
 
         string? token = TokenFileStore.Load();
         if (token != null)
@@ -2254,6 +2276,24 @@ public sealed class MainForm : Form
                 Logger.Log($"Found build {run.ShortSha} already downloaded at {existing}; skipping the download.");
                 extractDir = GitHubUpdaterService.ReuseExistingBuild(
                     existing, _state.InstallDir, _state.CurrentBranchKey, run.ShortSha, previousSha);
+            }
+            else if (run.WindowsAssetDownloadUrl != null)
+            {
+                // This run came from GetRecentReleaseBuildsAsync (see WorkflowRun.WindowsAssetDownloadUrl's
+                // doc comment) -- a published GitHub Release asset, not an Actions artifact.
+                SetStatus($"Downloading build {run.ShortSha}...");
+                Logger.Log($"Downloading release asset for {run.ShortSha}...");
+
+                bool releaseDownloadFinished = false;
+                var releaseDownloadProgress = new Progress<double>(fraction =>
+                {
+                    if (releaseDownloadFinished) return;
+                    _progress.DownloadFraction = fraction;
+                    SetStatus($"Downloading build {run.ShortSha}... {fraction:P0}");
+                });
+                extractDir = await _service.DownloadAndExtractReleaseAssetAsync(
+                    run.WindowsAssetDownloadUrl, run.ShortSha, _state.InstallDir, _state.CurrentBranchKey, previousSha, CancellationToken.None, releaseDownloadProgress);
+                releaseDownloadFinished = true;
             }
             else
             {

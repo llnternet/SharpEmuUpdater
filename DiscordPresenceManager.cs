@@ -56,8 +56,8 @@ public sealed class DiscordPresenceManager : IDisposable
         {
             _client.SetPresence(new RichPresence
             {
-                Details = $"Tracking {forkLabel}",
-                State = buildLabel == null ? "No build installed yet" : $"Build {buildLabel}{FormatPlatformsSuffix(platforms)}",
+                Details = forkLabel,
+                State = buildLabel == null ? "No build installed yet" : $"{buildLabel}{FormatPlatformsSuffix(platforms)}",
                 Timestamps = Timestamps.Now,
                 Assets = new Assets
                 {
@@ -72,13 +72,18 @@ public sealed class DiscordPresenceManager : IDisposable
         }
     }
 
+    // Short 3-letter codes (matches BuildListRenderer's own list formatting), not full platform
+    // names -- Discord's own profile card renders this at a fairly narrow fixed width and
+    // truncates with "..." well before any of Discord's actual character limits kick in;
+    // confirmed live against the user's own Discord profile ("Windows/macOS/..." was getting cut
+    // off), not a hypothetical concern.
     private static string FormatPlatformsSuffix(BuildPlatforms? platforms)
     {
         if (platforms is not { } p || p == BuildPlatforms.None) return "";
         var parts = new List<string>();
-        if (p.HasFlag(BuildPlatforms.Windows)) parts.Add("Windows");
-        if (p.HasFlag(BuildPlatforms.MacOS)) parts.Add("macOS");
-        if (p.HasFlag(BuildPlatforms.Linux)) parts.Add("Linux");
+        if (p.HasFlag(BuildPlatforms.Windows)) parts.Add("Win");
+        if (p.HasFlag(BuildPlatforms.MacOS)) parts.Add("Mac");
+        if (p.HasFlag(BuildPlatforms.Linux)) parts.Add("Lnx");
         return parts.Count > 0 ? $" · {string.Join("/", parts)}" : "";
     }
 

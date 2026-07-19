@@ -35,7 +35,11 @@ public static class ForkListRenderer
         // misleading "PR #" label with nothing after it.
         string prSuffix = fork.PullRequestNumber is int pr ? $" (PR #{pr})" : "";
         string branchPart = $"branch:{fork.Branch}{prSuffix}";
-        string text = $"{marker}{fork.OwnerLogin,-20} {branchPart,-42} {fork.PushedAt.ToLocalTime():MM-dd h:mm tt}   {fork.RepoFullName}{(isCurrent ? "  (active)" : "")}";
+        // "hh" (zero-padded), not "h" -- an unpadded hour renders "7:46 PM" (7 chars) vs
+        // "11:04 AM" (8 chars), a variable width that shifts the RepoFullName column left/right
+        // row to row depending on whether that row's push happened to land on a single- or
+        // double-digit hour (see the identical fix/comment in BuildListRenderer.cs).
+        string text = $"{marker}{fork.OwnerLogin,-20} {branchPart,-42} {fork.PushedAt.ToLocalTime():MM-dd hh:mm tt}   {fork.RepoFullName}{(isCurrent ? "  (active)" : "")}";
         var textRect = new Rectangle(e.Bounds.X + UiScale.S(26), e.Bounds.Y, e.Bounds.Width - UiScale.S(30), e.Bounds.Height);
         TextRenderer.DrawText(e.Graphics, text, e.Font, textRect, isCurrent ? Theme.Accent : Theme.Text,
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);

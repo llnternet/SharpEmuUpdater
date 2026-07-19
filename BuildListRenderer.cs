@@ -84,7 +84,17 @@ public static class BuildListRenderer
         // would shift every column after it row to row depending on which platforms that specific
         // build happened to produce, breaking alignment down the whole list.
         string platformsText = FormatPlatforms(cr.AvailablePlatforms);
-        string text = $"{marker}{cr.Run.ShortSha}  {cr.Run.DisplayNumber,-16}{cr.Run.CreatedAt.ToLocalTime():MM-dd h:mm tt}   {Theme.OutcomeLabel(cr.Outcome),-11}  {platformsText}  {sizeText,-8}{durationText,-8}{cr.Run.DisplayTitle}{(isCurrent ? "  (installed)" : "")}";
+        // Fixed-width, same reasoning as sizeText/durationText/platformsText above -- this used to
+        // be safe left unpadded since an Actions run's ShortSha is always exactly a 7-char git
+        // sha, but a Releases-backed row's ShortSha is a tag name (see WorkflowRun.ShortShaOverride),
+        // which varies in length ("v0.0.1" vs "win64-main-fa2616d"), so every column after it needs
+        // a reserved width to stay aligned row to row instead of drifting with the sha/tag length.
+        // "hh" (zero-padded), not "h" -- an unpadded hour renders "7:46 PM" (7 chars) vs
+        // "11:04 AM" (8 chars), a variable width that shifts every column after it row to row
+        // depending on whether that row's build happened to land on a single- or double-digit
+        // hour. Latent since this list has existed, just rarely visible before; became obvious
+        // once Recent Builds started mixing rows with very different sha/tag lengths too.
+        string text = $"{marker}{cr.Run.ShortSha,-20}{cr.Run.DisplayNumber,-16}{cr.Run.CreatedAt.ToLocalTime():MM-dd hh:mm tt}   {Theme.OutcomeLabel(cr.Outcome),-11}  {platformsText}  {sizeText,-8}{durationText,-8}{cr.Run.DisplayTitle}{(isCurrent ? "  (installed)" : "")}";
         var textRect = new Rectangle(UiScale.S(26), 0, w - UiScale.S(30), h);
         TextRenderer.DrawText(g, text, e.Font, textRect, isCurrent ? Theme.Accent : Theme.Text,
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);

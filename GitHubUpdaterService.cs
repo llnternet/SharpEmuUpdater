@@ -35,6 +35,16 @@ public sealed class GitHubUpdaterService : IDisposable
     private static bool IsInformativeConclusion(string? conclusion) =>
         conclusion is "success" or "failure" or "timed_out" or "neutral";
 
+    // A 404 from a repo-scoped GitHub API call almost always just means that repo/fork has since
+    // been deleted, renamed to something no longer reachable, or made private -- routine churn
+    // for a fork that showed up in an earlier "recently pushed" scan, not something the user did
+    // anything wrong to cause or can do anything about. Logging it as if it were a problem (next
+    // to genuinely actionable failures like a network hiccup or a rate limit) just trains the
+    // user to ignore the Activity Log. Anything else (network failure, secondary rate limit,
+    // unexpected shape) still gets logged -- those ARE worth knowing about.
+    private static bool IsNotFound(Exception ex) =>
+        ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound };
+
     /// <summary>
     /// A bare 401/403 from GetFromJsonAsync surfaces as "Response status code does not indicate
     /// success: 403 (Forbidden)" with nothing about WHY -- unhelpful either way, but especially so
@@ -68,6 +78,14 @@ public sealed class GitHubUpdaterService : IDisposable
     private readonly HttpClient _http;
     private readonly RateLimitTrackingHandler _rateLimitHandler = new();
 
+    // A second, deliberately unauthenticated client for downloading a GitHub Release asset's
+    // browser_download_url -- that URL is public, non-expiring, and commonly resolves to a
+    // different host (objects.githubusercontent.com) on its very first hop, not just after a
+    // redirect. _http carries an Authorization: Bearer {token} default header on every request it
+    // sends; reusing it here would leak the user's GitHub token to that third-party host for no
+    // reason, since release assets need no token at all.
+    private readonly HttpClient _downloadHttp = new();
+
     public string Owner { get; }
     public string Repo { get; }
 
@@ -88,6 +106,17 @@ public sealed class GitHubUpdaterService : IDisposable
         add => _rateLimitHandler.Updated += value;
         remove => _rateLimitHandler.Updated -= value;
     }
+
+    /// <summary>True only for the canonical upstream repo on its "main" branch -- the project's
+    /// own tagged-release line, not a contributor's in-progress branch. Used to switch "Recent
+    /// Builds" (and the ACTIVE FORK/SOURCE REPOSITORY label) from Actions CI run history over to
+    /// this repo's actual published GitHub Releases. Plain string params (not an instance method)
+    /// so BuildPickerForm -- which only has Owner/Repo/branch on hand, no AppState -- can call it
+    /// the same way MainForm does.</summary>
+    public static bool IsUpstreamMainBranch(string owner, string repo, string branch) =>
+        string.Equals(owner, UpstreamOwner, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(repo, UpstreamRepo, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(branch, "main", StringComparison.OrdinalIgnoreCase);
 
     public GitHubUpdaterService(string token, string owner = UpstreamOwner, string repo = UpstreamRepo)
     {
@@ -131,7 +160,8 @@ public sealed class GitHubUpdaterService : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Log($"Could not resolve current identity for {owner}/{repo}, using it as-is: {ex.Message}");
+            if (!IsNotFound(ex))
+                Logger.Log($"Could not resolve current identity for {owner}/{repo}, using it as-is: {ex.Message}");
         }
         return (owner, repo);
     }
@@ -212,7 +242,8 @@ public sealed class GitHubUpdaterService : IDisposable
             }
             catch (Exception ex)
             {
-                Logger.Log($"Could not scan {repoFullName}'s own Actions history for more active branches: {ex.Message}");
+                if (!IsNotFound(ex))
+                    Logger.Log($"Could not scan {repoFullName}'s own Actions history for more active branches: {ex.Message}");
                 return new List<ForkInfo>();
             }
             finally
@@ -509,6 +540,106 @@ public sealed class GitHubUpdaterService : IDisposable
     }
 
     /// <summary>
+    /// The Recent Builds data source for the upstream repo's own "main" branch specifically (see
+    /// GitHubUpdaterService.IsUpstreamMainBranch) -- published GitHub Releases instead of Actions
+    /// CI run history, since sharpemu/sharpemu's main branch is the project's own tagged-release
+    /// line, not a contributor's in-progress branch. Maps each release into a synthetic
+    /// WorkflowRun/ClassifiedRun (see WorkflowRun's ShortShaOverride/DisplayNumberOverride/
+    /// WindowsAssetDownloadUrl) so the entire existing rendering/context-menu/changelog/install
+    /// pipeline keeps working unchanged. Outcome is always Success -- a published release can't
+    /// "fail" the way a CI run can.
+    /// </summary>
+    public async Task<List<ClassifiedRun>> GetRecentReleaseBuildsAsync(int count, CancellationToken ct)
+    {
+        List<GitHubReleaseDto>? releases;
+        try
+        {
+            releases = await _http.GetFromJsonAsync<List<GitHubReleaseDto>>(
+                $"repos/{Owner}/{Repo}/releases?per_page={count}", ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw EnrichAuthError(ex, $"listing releases for {Owner}/{Repo}");
+        }
+
+        var result = new List<ClassifiedRun>();
+        foreach (var release in releases ?? new())
+        {
+            // A token with push access can see unpublished drafts via this same endpoint -- those
+            // must never show up as if they were a real recent build.
+            if (release.Draft) continue;
+
+            GitHubReleaseAssetDto? windowsAsset = null;
+            var platforms = BuildPlatforms.None;
+            foreach (var asset in release.Assets)
+            {
+                if (OtherPlatformKeywords.Any(k => asset.Name.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (asset.Name.Contains("osx", StringComparison.OrdinalIgnoreCase)
+                        || asset.Name.Contains("mac", StringComparison.OrdinalIgnoreCase)
+                        || asset.Name.Contains("darwin", StringComparison.OrdinalIgnoreCase))
+                        platforms |= BuildPlatforms.MacOS;
+                    else if (asset.Name.Contains("linux", StringComparison.OrdinalIgnoreCase))
+                        platforms |= BuildPlatforms.Linux;
+                    continue;
+                }
+                if (asset.Name.Contains("win", StringComparison.OrdinalIgnoreCase))
+                {
+                    platforms |= BuildPlatforms.Windows;
+                    windowsAsset ??= asset;
+                }
+            }
+
+            // No Windows asset on this release at all -- nothing installable, so it shouldn't
+            // show up in the list (mirrors GetRecentClassifiedRunsAsync's own "no Windows
+            // artifact" exclusion for the Actions path).
+            if (windowsAsset == null) continue;
+
+            var run = new WorkflowRun
+            {
+                Id = release.Id,
+                HeadSha = release.TagName,
+                ShortShaOverride = release.TagName,
+                // Left blank (not the tag name again) -- DisplayNumber's whole purpose for an
+                // Actions run is to show something ShortSha doesn't (a run/PR number); for a
+                // release, ShortSha already IS the tag name, so repeating it here would just show
+                // the same value twice in adjacent columns.
+                DisplayNumberOverride = "",
+                // The release's own notes (first line), the same role a commit message plays for
+                // an Actions row -- falls back to the release name, then the bare tag, only if a
+                // release was published with no notes at all. Not release.Name directly, which
+                // would just repeat the tag a second time (it's almost always "SharpEmu {tag}").
+                DisplayTitle = FirstNonBlankLine(release.Body)
+                    ?? (string.IsNullOrWhiteSpace(release.Name) ? release.TagName : release.Name),
+                CreatedAt = release.PublishedAt,
+                UpdatedAt = release.PublishedAt,
+                HtmlUrl = release.HtmlUrl,
+                WindowsAssetDownloadUrl = windowsAsset.BrowserDownloadUrl,
+            };
+
+            result.Add(new ClassifiedRun
+            {
+                Run = run,
+                Outcome = BuildOutcome.Success,
+                WindowsArtifactSizeBytes = windowsAsset.Size,
+                AvailablePlatforms = platforms,
+            });
+        }
+
+        return result.Take(count).ToList();
+    }
+
+    /// <summary>The Recent Builds list renders DisplayTitle on one line -- a multi-line release
+    /// body would otherwise show raw "\n"-joined text squashed onto that single line. Returns null
+    /// (not "") for a blank/whitespace-only body so the caller's own fallback chain applies.</summary>
+    private static string? FirstNonBlankLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return text.Split('\n', StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+    }
+
+    /// <summary>
     /// Commits between two shas on this repo, newest first -- the actual git history, not the
     /// "Build and Release" run history (GetRecentClassifiedRunsAsync's list). Distinct because not
     /// every commit necessarily has its own successful run: one might get skipped by a path
@@ -661,7 +792,6 @@ public sealed class GitHubUpdaterService : IDisposable
         Directory.CreateDirectory(branchDir);
 
         string tempZip = Path.Combine(Path.GetTempPath(), $"{artifact.Name}-{Guid.NewGuid():N}.zip");
-        string extractDir = Path.Combine(branchDir, sha);
 
         try
         {
@@ -677,42 +807,92 @@ public sealed class GitHubUpdaterService : IDisposable
                         "Update token.txt with a token that has that scope and click 'Reload Token from File'.");
                 }
                 response.EnsureSuccessStatusCode();
-
-                long? totalBytes = response.Content.Headers.ContentLength;
-                await using var httpStream = await response.Content.ReadAsStreamAsync(ct);
-                await using var fileStream = File.Create(tempZip);
-
-                if (progress == null || totalBytes is not > 0)
-                {
-                    await httpStream.CopyToAsync(fileStream, ct);
-                }
-                else
-                {
-                    var buffer = new byte[81920];
-                    long totalRead = 0;
-                    int bytesRead;
-                    while ((bytesRead = await httpStream.ReadAsync(buffer, ct)) > 0)
-                    {
-                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-                        totalRead += bytesRead;
-                        progress.Report((double)totalRead / totalBytes.Value);
-                    }
-                }
+                await DownloadToFileAsync(response, tempZip, progress, ct);
             }
 
-            if (Directory.Exists(extractDir))
-                Directory.Delete(extractDir, recursive: true);
-
-            ZipFile.ExtractToDirectory(tempZip, extractDir);
-            UnwrapNestedZips(extractDir);
-            CarryOverGuiSettings(branchDir, previousSha, sha, extractDir);
-            return extractDir;
+            return FinishExtraction(tempZip, branchDir, sha, previousSha);
         }
         finally
         {
             if (File.Exists(tempZip))
                 File.Delete(tempZip);
         }
+    }
+
+    /// <summary>
+    /// Downloads a GitHub Release asset (its public, non-expiring browser_download_url -- never an
+    /// Actions artifact ID) and extracts it the same way DownloadAndExtractArtifactAsync does.
+    /// Uses _downloadHttp (unauthenticated, see its own doc comment) rather than _http, since this
+    /// URL needs no token and often resolves to a non-api.github.com host on the first hop. A
+    /// failure here is far more likely a stale/rotated asset URL than an auth problem, so unlike
+    /// the Actions path there's no 401/403-specific messaging.
+    /// </summary>
+    public async Task<string> DownloadAndExtractReleaseAssetAsync(
+        string downloadUrl, string sha, string installDir, string branchFolder, string? previousSha, CancellationToken ct,
+        IProgress<double>? progress = null)
+    {
+        string branchDir = Path.Combine(installDir, branchFolder);
+        Directory.CreateDirectory(branchDir);
+
+        string tempZip = Path.Combine(Path.GetTempPath(), $"release-asset-{Guid.NewGuid():N}.zip");
+
+        try
+        {
+            using (var response = await _downloadHttp.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct))
+            {
+                response.EnsureSuccessStatusCode();
+                await DownloadToFileAsync(response, tempZip, progress, ct);
+            }
+
+            return FinishExtraction(tempZip, branchDir, sha, previousSha);
+        }
+        finally
+        {
+            if (File.Exists(tempZip))
+                File.Delete(tempZip);
+        }
+    }
+
+    /// <summary>Shared byte-streaming-with-progress loop, used by both the Actions-artifact and
+    /// Release-asset download paths -- identical either way once a successful HttpResponseMessage
+    /// is in hand.</summary>
+    private static async Task DownloadToFileAsync(HttpResponseMessage response, string destPath, IProgress<double>? progress, CancellationToken ct)
+    {
+        long? totalBytes = response.Content.Headers.ContentLength;
+        await using var httpStream = await response.Content.ReadAsStreamAsync(ct);
+        await using var fileStream = File.Create(destPath);
+
+        if (progress == null || totalBytes is not > 0)
+        {
+            await httpStream.CopyToAsync(fileStream, ct);
+        }
+        else
+        {
+            var buffer = new byte[81920];
+            long totalRead = 0;
+            int bytesRead;
+            while ((bytesRead = await httpStream.ReadAsync(buffer, ct)) > 0)
+            {
+                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                totalRead += bytesRead;
+                progress.Report((double)totalRead / totalBytes.Value);
+            }
+        }
+    }
+
+    /// <summary>Shared post-download tail (extract, unwrap, carry over settings), used by both the
+    /// Actions-artifact and Release-asset download paths -- identical either way once the zip is
+    /// on disk at tempZip.</summary>
+    private static string FinishExtraction(string tempZip, string branchDir, string sha, string? previousSha)
+    {
+        string extractDir = Path.Combine(branchDir, sha);
+        if (Directory.Exists(extractDir))
+            Directory.Delete(extractDir, recursive: true);
+
+        ZipFile.ExtractToDirectory(tempZip, extractDir);
+        UnwrapNestedZips(extractDir);
+        CarryOverGuiSettings(branchDir, previousSha, sha, extractDir);
+        return extractDir;
     }
 
     /// <summary>
@@ -841,5 +1021,9 @@ public sealed class GitHubUpdaterService : IDisposable
             CopyDirectoryRecursive(dir, Path.Combine(dest, Path.GetFileName(dir)));
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _downloadHttp.Dispose();
+    }
 }

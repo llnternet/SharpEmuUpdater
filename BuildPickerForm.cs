@@ -165,7 +165,9 @@ public sealed class BuildPickerForm : Form
                 ? _successfulRuns[_listBox.SelectedIndex].Run.ShortSha
                 : null;
 
-            var classified = await _service.GetRecentClassifiedRunsAsync(RunsToFetch, _branch, CancellationToken.None);
+            var classified = GitHubUpdaterService.IsUpstreamMainBranch(_service.Owner, _service.Repo, _branch)
+                ? await _service.GetRecentReleaseBuildsAsync(RunsToFetch, CancellationToken.None)
+                : await _service.GetRecentClassifiedRunsAsync(RunsToFetch, _branch, CancellationToken.None);
             // The caller (MainForm.OpenBuildPickerAsync) wraps this dialog in a `using` -- if the
             // user closed it (Cancel, or the window X) while the fetch above was still in flight,
             // it's already disposed by the time this continuation resumes, and every control

@@ -29,8 +29,7 @@ public static class GitHubStatusChecker
             var response = await _http.GetFromJsonAsync<UnresolvedIncidentsResponse>(
                 "https://www.githubstatus.com/api/v2/incidents/unresolved.json", ct);
             return (response?.Incidents ?? new())
-                .Where(i => i.Name.Contains("API", StringComparison.OrdinalIgnoreCase) ||
-                            i.Name.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                .Where(i => i.AffectsBuildTracking)
                 .OrderByDescending(i => i.UpdatedAt)
                 .FirstOrDefault();
         }
@@ -76,6 +75,22 @@ public sealed class GitHubIncident
     /// performance. We are continuing to investigate." -- more specific and current than just the
     /// incident's own title.</summary>
     public string? LatestUpdateBody => IncidentUpdates.OrderByDescending(u => u.DisplayAt).FirstOrDefault()?.Body;
+
+    // A real incident's own title is often generic ("Incident with GitHub Actions", "Disruption
+    // with some GitHub services") and won't literally contain "API" even when it's actively
+    // breaking the API Requests/Actions calls this app depends on -- confirmed live, both of
+    // those exact titles were active simultaneously while this app was hitting real 503s, and
+    // the old name-only filter (just Name.Contains("API")/"rate limit") missed both. Each
+    // incident update carries its own affected_components snapshot (a component's status can
+    // change between updates), so only the LATEST update's list reflects what's actually affected
+    // right now -- an earlier update naming a component that's since recovered shouldn't count.
+    private static readonly string[] RelevantComponentNames = { "API Requests", "Actions" };
+
+    public bool AffectsBuildTracking =>
+        Name.Contains("API", StringComparison.OrdinalIgnoreCase) ||
+        Name.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+        (IncidentUpdates.OrderByDescending(u => u.DisplayAt).FirstOrDefault()?.AffectedComponents ?? new())
+            .Any(c => RelevantComponentNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase));
 }
 
 public sealed class GitHubIncidentUpdate
@@ -85,4 +100,13 @@ public sealed class GitHubIncidentUpdate
 
     [JsonPropertyName("display_at")]
     public DateTimeOffset DisplayAt { get; set; }
+
+    [JsonPropertyName("affected_components")]
+    public List<AffectedComponentDto>? AffectedComponents { get; set; }
+}
+
+public sealed class AffectedComponentDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
 }

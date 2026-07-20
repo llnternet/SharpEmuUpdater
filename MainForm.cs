@@ -1769,10 +1769,16 @@ public sealed class MainForm : Form
             _recentRuns = GitHubUpdaterService.IsUpstreamMainBranch(_service.Owner, _service.Repo, _state.ForkBranch)
                 ? await _service.GetRecentReleaseBuildsAsync(RecentRunsToShow, CancellationToken.None)
                 : await _service.GetRecentClassifiedRunsAsync(RecentRunsToShow, _state.ForkBranch, CancellationToken.None);
-            // Reaching this line means the real GitHub API call just succeeded -- whatever
-            // incident (if any) was being watched is no longer stopping requests from going
-            // through, so there's nothing left to poll for.
-            StopWatchingGitHubStatus();
+            // Deliberately does NOT call StopWatchingGitHubStatus() here just because this one
+            // request happened to succeed -- during a real partial/degraded outage (confirmed
+            // live: GitHub's own status page listing an unresolved incident while some requests
+            // still went through fine), that let a lucky success flip GITHUB STATUS back to "No
+            // known issues" even though the incident was still very much active, only for the
+            // next failure to show it again -- a flicker that made the row actively misleading
+            // instead of just occasionally stale. PollGitHubStatusAsync's own 30s poll of the
+            // status page (not this app's own API calls) is the one authority that clears this,
+            // exactly because it checks whether GitHub itself has actually resolved it rather
+            // than inferring that from whether one particular request got lucky.
             RefreshBuildsList();
             ApplyRecentRunsResult();
             // A manual/full check always applies -- keep the live-poll baseline in sync so
@@ -1799,6 +1805,20 @@ public sealed class MainForm : Form
             if (!manual)
             {
                 Logger.Log($"Automatic check hit a network hiccup, will retry automatically: {ex.Message}");
+
+                // Still worth checking whether GitHub itself is the cause, even though this is a
+                // quiet automatic tick -- GITHUB STATUS is its own row specifically so this can be
+                // shown without touching the main STATUS line above (see ShowIncidentStatus's own
+                // comment), so surfacing it here doesn't conflict with "automatic ticks stay
+                // quiet." Previously this only ever got checked after a manual Check Now happened
+                // to also fail, so a real incident could sit unreported for however long it took
+                // before the user clicked Check Now themselves.
+                var autoIncident = await GitHubStatusChecker.GetActiveApiIncidentAsync(CancellationToken.None);
+                if (autoIncident != null)
+                {
+                    ShowIncidentStatus(autoIncident);
+                    _gitHubStatusTimer.Start();
+                }
                 return;
             }
 

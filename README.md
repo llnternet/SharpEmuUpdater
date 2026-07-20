@@ -47,6 +47,13 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
   if the project ever renames its build artifacts
 - Automatically follows the main SharpEmu repo (and any fork/branch you're tracking) if it's
   renamed or transferred to a new owner on GitHub -- no need to manually re-point the app
+- Tracking upstream `sharpemu/sharpemu` on `main` shows it as "Source Repository" and pulls Recent
+  Builds straight from its GitHub Releases instead of raw CI runs; any other fork/branch still
+  shows as "Active Fork" backed by Actions CI as before
+- Runs tied to an open pull request show its number right in Recent Builds, e.g. `#968 (PR #412)`
+- If a selected build's CI run has since vanished upstream (fork owner cleared their Actions
+  history, disabled Actions, etc.), you get a clear "no longer available -- pick a different
+  build" message instead of a raw HTTP error
 
 **🔔 Notifications & Status**
 - Toast notifications + tray badge when a new build is available
@@ -54,7 +61,10 @@ own public GitHub Actions already produce. Provided "as is," no warranty.
   Available" dialog (current/new version, download size, changelog) with Download and Install,
   Skip This Update, or Remind Me Later
 - Live GitHub API budget indicator, with a clear warning if you get rate-limited
-- Live GitHub status indicator if GitHub itself is having an outage
+- Live GitHub status indicator if GitHub itself is having an outage -- checked on both manual and
+  automatic checks, matches any incident affecting API/Actions availability (not just ones
+  mentioning "API" by name), and stays accurate for the outage's full duration instead of
+  flickering back to "No known issues" between individual request successes
 - Status stays live-synced with the build list at all times
 
 **📝 Activity Log**

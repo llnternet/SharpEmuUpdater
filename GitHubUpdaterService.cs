@@ -42,7 +42,7 @@ public sealed class GitHubUpdaterService : IDisposable
     // to genuinely actionable failures like a network hiccup or a rate limit) just trains the
     // user to ignore the Activity Log. Anything else (network failure, secondary rate limit,
     // unexpected shape) still gets logged -- those ARE worth knowing about.
-    private static bool IsNotFound(Exception ex) =>
+    public static bool IsNotFound(Exception ex) =>
         ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound };
 
     /// <summary>

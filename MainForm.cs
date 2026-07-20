@@ -2390,10 +2390,23 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            SetStatus("Update failed - see log. Click to retry.");
-            _statusValueLabel.ForeColor = Theme.Danger;
-            Logger.Log($"Error applying update: {ex.Message}");
-            SetRetryAction(() => ApplyUpdateAsync(run));
+            if (GitHubUpdaterService.IsNotFound(ex))
+            {
+                // The run this build pointed to has since vanished upstream (fork owner deleted
+                // their Actions history, disabled Actions, or the run/artifacts expired) between
+                // the moment it was scanned and now -- retrying hits the exact same 404 forever,
+                // so don't offer a retry action for this specific case.
+                SetStatus($"Build {run.ShortSha} is no longer available upstream. Pick a different build.");
+                _statusValueLabel.ForeColor = Theme.Danger;
+                Logger.Log($"Build {run.ShortSha} (run {run.Id}) is no longer available -- its CI run or artifacts were deleted upstream.");
+            }
+            else
+            {
+                SetStatus("Update failed - see log. Click to retry.");
+                _statusValueLabel.ForeColor = Theme.Danger;
+                Logger.Log($"Error applying update: {ex.Message}");
+                SetRetryAction(() => ApplyUpdateAsync(run));
+            }
         }
         finally
         {
